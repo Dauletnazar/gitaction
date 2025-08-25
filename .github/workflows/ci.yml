@@ -45,7 +45,7 @@ jobs:
 
       - name: Upload artifacts (if exists)
         if: ${{ success() && hashFiles('**/target/*.jar') != '' }}
-        uses: actions/upload-artifact@4
+        uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
           path: |
