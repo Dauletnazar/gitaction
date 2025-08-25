@@ -6,7 +6,11 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write  # allow pushing a small proof file
+  contents: write  # needed to push the proof file back
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   ci:
@@ -23,7 +27,7 @@ jobs:
           java-version: '17'
           cache: maven
 
-      # Install the software (Maven) if needed.
+      # Install Maven if missing
       - name: Ensure Maven installed
         run: |
           if ! command -v mvn >/dev/null 2>&1; then
@@ -38,23 +42,55 @@ jobs:
       - name: Build & Test
         run: mvn -B -ntp verify
 
-      - name: List built jars (debug)
+      # Debug: list produced artifacts
+      - name: List built artifacts (debug)
+        if: always()
         run: |
-          echo "Looking for JARs..."
-          find . -type f -name "*jar" -print || true
+          echo "JARs:"
+          find . -type f -name "*.jar" -not -name "*-sources.jar" -not -name "*-javadoc.jar" -print || true
+          echo "WARs:"
+          find . -type f -name "*.war" -print || true
+          echo "Test reports:"
+          find . -type f -path "*/target/*reports/*" -print || true
 
-      - name: Upload artifacts (if exists)
-        if: ${{ success() && hashFiles('**/target/*.jar') != '' }}
+      # Upload JAR/WAR if present
+      - name: Upload JAR/WAR (if exists)
+        if: ${{ success() && (hashFiles('**/target/*.jar') != '' || hashFiles('**/target/*.war') != '') }}
         uses: actions/upload-artifact@v4
         with:
           name: build-artifacts
           path: |
             **/target/*.jar
+            **/target/*.war
             !**/*-sources.jar
             !**/*-javadoc.jar
 
-      - name: Commit CI proof back (pull → commit → push)
-        if: ${{ github.event_name != 'pull_request' }}
+      # Always upload test reports (ensures an artifact is visible in run summary)
+      - name: Upload test reports (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-reports
+          path: |
+            **/target/surefire-reports/**
+            **/target/failsafe-reports/**
+          if-no-files-found: ignore
+
+      # Always upload a tiny build proof artifact
+      - name: Create build proof (always)
+        if: always()
+        run: echo "Run #${{ github.run_number }} attempt #${{ github.run_attempt }} on ${{ github.run_id }} at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" > build-proof.txt
+
+      - name: Upload build proof (always)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-proof
+          path: build-proof.txt
+
+      # Commit a proof line back to the repo (first attempt only, not on PRs)
+      - name: Commit CI proof back (pull -> commit -> push)
+        if: ${{ github.event_name != 'pull_request' && github.run_attempt == 1 }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -62,17 +98,15 @@ jobs:
           git config user.name "${{ github.actor }}"
           git config user.email "${{ github.actor }}@users.noreply.github.com"
 
-          # Update branch, to avoid non-fast-forward
+          # Sync with remote to avoid non-fast-forward
           git fetch origin ${{ github.ref_name }}
           git checkout ${{ github.ref_name }}
           git pull --rebase origin ${{ github.ref_name }}
 
-          # Update proof-file
           mkdir -p .github
-          echo "Run #${{ github.run_number }} attempt #${{ github.run_attempt }} at $(date -u +'%Y-%m-%dT%H:%M:%SZ') by ${{ github.actor }}" >> .github/ci-proof.txt
+          echo "Run #${{ github.run_number }} attempt #${{ github.run_attempt }} on ${{ github.run_id }} at $(date -u +'%Y-%m-%dT%H:%M:%SZ') by ${{ github.actor }}" >> .github/ci-proof.txt
 
           git add .github/ci-proof.txt
           git commit -m "ci: proof of run [skip ci]" || echo "Nothing to commit"
-
-          # Push without --force
           git push origin HEAD:${{ github.ref_name }}
+
