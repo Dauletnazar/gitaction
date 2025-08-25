@@ -6,7 +6,7 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write  # allow pushing the proof file back to the repo
+  contents: write  # needed to push the proof file back
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -76,45 +76,3 @@ jobs:
             **/target/failsafe-reports/**
           if-no-files-found: ignore
 
-      # Always create and upload a tiny build proof artifact
-      - name: Create build proof (always)
-        if: always()
-        shell: bash
-        run: |
-          set -e
-          TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          echo "Run #${{ github.run_number }} attempt #${{ github.run_attempt }} on ${{ github.run_id }} at ${TS}" > build-proof.txt
-          ls -l build-proof.txt || true
-          cat build-proof.txt || true
-
-      - name: Upload build proof (always)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-proof
-          path: build-proof.txt
-          if-no-files-found: warn
-
-      # Commit a proof line back to the repo (first attempt only, not on PRs)
-      - name: Commit CI proof back (pull -> commit -> push)
-        if: ${{ github.event_name != 'pull_request' && github.run_attempt == 1 }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: bash
-        run: |
-          set -e
-          git config user.name "${{ github.actor }}"
-          git config user.email "${{ github.actor }}@users.noreply.github.com"
-
-          # Sync with remote to avoid non-fast-forward
-          git fetch origin ${{ github.ref_name }}
-          git checkout ${{ github.ref_name }}
-          git pull --rebase origin ${{ github.ref_name }}
-
-          mkdir -p .github
-          TS=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          echo "Run #${{ github.run_number }} attempt #${{ github.run_attempt }} on ${{ github.run_id }} at ${TS} by ${{ github.actor }}" >> .github/ci-proof.txt
-
-          git add .github/ci-proof.txt
-          git commit -m "ci: proof of run [skip ci]" || echo "Nothing to commit"
-          git push origin HEAD:${{ github.ref_name }}
