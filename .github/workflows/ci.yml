@@ -38,15 +38,20 @@ jobs:
       - name: Build & Test
         run: mvn -B -ntp verify
 
-      - name: Upload artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: List built jars (debug)
+        run: |
+          echo "Looking for JARs..."
+          find . -type f -name "*jar" -print || true
+
+      - name: Upload artifacts (if exists)
+        if: ${{ success() && hashFiles('**/target/*.jar') != '' }}
+        uses: actions/upload-artifact@4
         with:
           name: build-artifacts
           path: |
-            target/*.jar
-            !target/*-sources.jar
-            !target/*-javadoc.jar
+            **/target/*.jar
+            !**/*-sources.jar
+            !**/*-javadoc.jar
 
       - name: Commit CI proof back (pull → commit → push)
         if: ${{ github.event_name != 'pull_request' }}
