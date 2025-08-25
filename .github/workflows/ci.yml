@@ -48,13 +48,26 @@ jobs:
             !target/*-sources.jar
             !target/*-javadoc.jar
 
-      - name: Commit CI proof back
+      - name: Commit CI proof back (pull → commit → push)
+        if: ${{ github.event_name != 'pull_request' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "CI run ${{ github.run_number }} at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> .github/ci-proof.txt
+          set -e
           git config user.name "${{ github.actor }}"
           git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+          # Update branch, to avoid non-fast-forward
+          git fetch origin ${{ github.ref_name }}
+          git checkout ${{ github.ref_name }}
+          git pull --rebase origin ${{ github.ref_name }}
+
+          # Update proof-file
+          mkdir -p .github
+          echo "Run #${{ github.run_number }} attempt #${{ github.run_attempt }} at $(date -u +'%Y-%m-%dT%H:%M:%SZ') by ${{ github.actor }}" >> .github/ci-proof.txt
+
           git add .github/ci-proof.txt
           git commit -m "ci: proof of run [skip ci]" || echo "Nothing to commit"
+
+          # Push without --force
           git push origin HEAD:${{ github.ref_name }}
