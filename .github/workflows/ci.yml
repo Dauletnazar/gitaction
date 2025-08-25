@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  workflow_dispatch: {}
+
+permissions:
+  contents: write  # allow pushing a small proof file
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+
+      # Install the software (Maven) if needed.
+      - name: Ensure Maven installed
+        run: |
+          if ! command -v mvn >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y maven
+          fi
+          mvn -v
+
+      - name: Resolve dependencies
+        run: mvn -B -ntp dependency:go-offline
+
+      - name: Build & Test
+        run: mvn -B -ntp verify
+
+      - name: Upload artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            target/*.jar
+            !target/*-sources.jar
+            !target/*-javadoc.jar
+
+      - name: Commit CI proof back
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "CI run ${{ github.run_number }} at $(date -u +'%Y-%m-%dT%H:%M:%SZ')" >> .github/ci-proof.txt
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          git add .github/ci-proof.txt
+          git commit -m "ci: proof of run [skip ci]" || echo "Nothing to commit"
+          git push origin HEAD:${{ github.ref_name }}
